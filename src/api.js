@@ -1,7 +1,11 @@
-const API_PREFIX = '/api/v1';
+const AUTH_API_PREFIX = 'http://localhost:8008/api/v1';
+const CORE_API_PREFIX = 'http://localhost:8000/api/v1';
 
-function buildUrl(path, query) {
-  const url = new URL(`${API_PREFIX}${path}`, window.location.origin);
+function buildUrl(basePrefix, path, query) {
+  const target = basePrefix.startsWith('http')
+    ? `${basePrefix}${path}`
+    : `${basePrefix}${path}`;
+  const url = new URL(target, window.location.origin);
 
   if (query) {
     Object.entries(query).forEach(([key, value]) => {
@@ -9,6 +13,10 @@ function buildUrl(path, query) {
         url.searchParams.set(key, String(value));
       }
     });
+  }
+
+  if (basePrefix.startsWith('http')) {
+    return url.toString();
   }
 
   return `${url.pathname}${url.search}`;
@@ -20,6 +28,8 @@ export async function apiRequest(path, options = {}) {
     query,
     body,
     headers = {},
+    token,
+    basePrefix = AUTH_API_PREFIX,
   } = options;
 
   const requestHeaders = { ...headers };
@@ -33,7 +43,11 @@ export async function apiRequest(path, options = {}) {
     config.body = JSON.stringify(body);
   }
 
-  const response = await fetch(buildUrl(path, query), config);
+  if (token) {
+    requestHeaders.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(buildUrl(basePrefix, path, query), config);
   const text = await response.text();
   let data = null;
 
@@ -55,4 +69,12 @@ export async function apiRequest(path, options = {}) {
   }
 
   return data;
+}
+
+export function authRequest(path, options = {}) {
+  return apiRequest(path, { ...options, basePrefix: AUTH_API_PREFIX });
+}
+
+export function coreRequest(path, options = {}) {
+  return apiRequest(path, { ...options, basePrefix: CORE_API_PREFIX });
 }

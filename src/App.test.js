@@ -1,7 +1,20 @@
 import { render, screen } from '@testing-library/react';
 import App from './App';
 
-test('renders auth page heading', () => {
+beforeEach(() => {
+  global.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    text: async () => '[]',
+  });
+});
+
+afterEach(() => {
+  jest.resetAllMocks();
+});
+
+test('renders auth page heading', async () => {
   render(<App />);
-  expect(screen.getByText(/Sign in/i)).toBeInTheDocument();
+  expect(
+    await screen.findByRole('heading', { name: /Sign in/i })
+  ).toBeInTheDocument();
 });
