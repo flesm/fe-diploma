@@ -1,5 +1,7 @@
 const AUTH_API_PREFIX = 'http://localhost:8008/api/v1';
 const CORE_API_PREFIX = 'http://localhost:8000/api/v1';
+const CHAT_API_PREFIX = 'http://localhost:8010/api/v1';
+const FILE_API_PREFIX = 'http://localhost:8020/api/v1';
 
 function buildUrl(basePrefix, path, query) {
   const target = basePrefix.startsWith('http')
@@ -77,4 +79,12 @@ export function authRequest(path, options = {}) {
 
 export function coreRequest(path, options = {}) {
   return apiRequest(path, { ...options, basePrefix: CORE_API_PREFIX });
+}
+
+export function chatRequest(path, options = {}) {
+  return apiRequest(path, { ...options, basePrefix: CHAT_API_PREFIX });
+}
+
+export function fileRequest(path, options = {}) {
+  return apiRequest(path, { ...options, basePrefix: FILE_API_PREFIX });
 }
