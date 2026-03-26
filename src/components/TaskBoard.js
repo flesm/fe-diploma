@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
-
-function shortId(value) {
-  return value ? String(value).slice(0, 8) : 'Unknown';
-}
+import { UserAvatar } from '../shared/ui/UserAvatar';
+import { shortId } from '../shared/lib/user';
 
 export function TaskBoard({
   boardColumns,
-  internNameMap,
+  userMap,
+  userNameMap,
   selectedTask,
   onMoveTask,
   onSelectTask,
@@ -73,7 +72,8 @@ export function TaskBoard({
                 <div className="task-card-topline">
                   <span className="task-key">TASK-{shortId(task.id)}</span>
                   <span className="task-assignee">
-                    {internNameMap?.[task.intern_id] || shortId(task.intern_id)}
+                    <UserAvatar size="xs" user={userMap?.[task.intern_id] || { id: task.intern_id }} />
+                    <span>{userNameMap?.[task.intern_id] || shortId(task.intern_id)}</span>
                   </span>
                 </div>
                 <strong>{task.title}</strong>

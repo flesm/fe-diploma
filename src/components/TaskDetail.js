@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
 import { getDownloadUrl, uploadFileAsset } from '../fileService';
-
-function shortId(value) {
-  return value ? String(value).slice(0, 8) : 'Unknown';
-}
+import { shortId } from '../shared/lib/user';
+import { UserAvatar } from '../shared/ui/UserAvatar';
 
 export function TaskDetail({
   currentUser,
-  internNameMap,
+  userMap,
+  userNameMap,
   mentorLinks,
   selectedTask,
   selectedTaskColumnName,
@@ -61,8 +60,10 @@ export function TaskDetail({
   return (
     <div className="detail-drawer-backdrop" onClick={onClose} role="presentation">
       <aside
+        aria-modal="true"
         className="dashboard-card detail-panel jira-detail-panel"
         onClick={(event) => event.stopPropagation()}
+        role="dialog"
       >
         <div className="section-head detail-panel-head">
           <div>
@@ -70,9 +71,17 @@ export function TaskDetail({
             <h3>{selectedTask.title}</h3>
             <div className="detail-meta-row">
               <span className="detail-badge">TASK-{shortId(selectedTask.id)}</span>
-              <span className="detail-badge subtle">{selectedTaskColumnName || 'Без статуса'}</span>
               <span className="detail-badge subtle">
-                Исполнитель {internNameMap?.[selectedTask.intern_id] || shortId(selectedTask.intern_id)}
+                {selectedTaskColumnName || 'Без статуса'}
+              </span>
+              <span className="detail-badge subtle detail-user-badge">
+                <UserAvatar
+                  size="xs"
+                  user={userMap?.[selectedTask.intern_id] || { id: selectedTask.intern_id }}
+                />
+                <span>
+                  Исполнитель {userNameMap?.[selectedTask.intern_id] || shortId(selectedTask.intern_id)}
+                </span>
               </span>
             </div>
           </div>
@@ -126,7 +135,7 @@ export function TaskDetail({
                 >
                   {mentorLinks.map((link) => (
                     <option key={link.id} value={link.intern_id}>
-                      {internNameMap?.[link.intern_id] || shortId(link.intern_id)}
+                      {userNameMap?.[link.intern_id] || shortId(link.intern_id)}
                     </option>
                   ))}
                 </select>
@@ -157,8 +166,14 @@ export function TaskDetail({
             <div className="item-list">
               {taskComments.map((comment) => (
                 <article className="item-card" key={comment.id}>
+                  <div className="item-card-meta">
+                    <UserAvatar
+                      size="xs"
+                      user={userMap?.[comment.author_id] || { id: comment.author_id }}
+                    />
+                    <span>{userNameMap?.[comment.author_id] || shortId(comment.author_id)}</span>
+                  </div>
                   <p>{comment.content}</p>
-                  <span>{shortId(comment.author_id)}</span>
                   {comment.author_id === currentUser?.id && (
                     <button
                       className="text-button"
@@ -197,10 +212,16 @@ export function TaskDetail({
             <div className="item-list">
               {taskLinks.map((link) => (
                 <article className="item-card" key={link.id}>
+                  <div className="item-card-meta">
+                    <UserAvatar
+                      size="xs"
+                      user={userMap?.[link.author_id] || { id: link.author_id }}
+                    />
+                    <span>{userNameMap?.[link.author_id] || shortId(link.author_id)}</span>
+                  </div>
                   <a href={link.url} rel="noreferrer" target="_blank">
                     {link.title}
                   </a>
-                  <span>{shortId(link.author_id)}</span>
                   {link.author_id === currentUser?.id && (
                     <button
                       className="text-button"

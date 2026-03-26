@@ -1,13 +1,18 @@
 /* eslint-disable no-use-before-define */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import './App.css';
-import { authRequest, coreRequest } from './api';
+import {
+  authRequest,
+  coreRequest,
+  registerAuthFailureHandler,
+} from './api';
 import { clearSession, loadSession, saveSession } from './storage';
 import { LoginScreen, RegisterScreen } from './components/AuthScreen';
 import { ChatModal } from './components/ChatModal';
 import { MaterialsPage } from './components/MaterialsPage';
 import { TaskBoard } from './components/TaskBoard';
 import { TaskDetail } from './components/TaskDetail';
+import { buildUserFullName, shortId } from './shared/lib/user';
 
 const EMPTY_REGISTER_FORM = {
   email: '',
@@ -82,15 +87,6 @@ function buildTaskDraft(task) {
   };
 }
 
-function shortId(value) {
-  return value ? String(value).slice(0, 8) : 'Unknown';
-}
-
-function buildUserFullName(user) {
-  const fullName = [user?.first_name, user?.last_name].filter(Boolean).join(' ').trim();
-  return fullName || shortId(user?.id);
-}
-
 function Modal({ title, subtitle, children, onClose }) {
   return (
     <div className="modal-backdrop" onClick={onClose} role="presentation">
@@ -131,7 +127,7 @@ function App() {
   const [statuses, setStatuses] = useState([]);
   const [boardColumns, setBoardColumns] = useState([]);
   const [mentorLinks, setMentorLinks] = useState([]);
-  const [internDirectory, setInternDirectory] = useState([]);
+  const [userDirectory, setUserDirectory] = useState([]);
   const [myMentorLink, setMyMentorLink] = useState(null);
   const [selectedInternId, setSelectedInternId] = useState('');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('');
@@ -158,6 +154,24 @@ function App() {
     [selectedTask?.status_id, statuses]
   );
 
+  const userMap = useMemo(() => {
+    return userDirectory.reduce((accumulator, user) => {
+      accumulator[user.id] = user;
+      return accumulator;
+    }, {});
+  }, [userDirectory]);
+
+  const userNameMap = useMemo(() => {
+    return userDirectory.reduce((accumulator, user) => {
+      accumulator[user.id] = buildUserFullName(user);
+      return accumulator;
+    }, {});
+  }, [userDirectory]);
+
+  const internDirectory = useMemo(() => {
+    return userDirectory.filter((user) => user.role === 'intern');
+  }, [userDirectory]);
+
   const visibleInternOptions = useMemo(() => {
     if (currentUser?.role !== 'mentor') {
       return [];
@@ -166,12 +180,10 @@ function App() {
     return mentorLinks.map((link) => ({
       id: link.id,
       value: link.intern_id,
-      label:
-        buildUserFullName(
-          internDirectory.find((user) => user.id === link.intern_id)
-        ) || shortId(link.intern_id),
+      label: userNameMap[link.intern_id] || shortId(link.intern_id),
+      user: userMap[link.intern_id] || { id: link.intern_id },
     }));
-  }, [currentUser?.role, internDirectory, mentorLinks]);
+  }, [currentUser?.role, mentorLinks, userMap, userNameMap]);
 
   const filteredInternDirectory = useMemo(() => {
     const query = internSearch.trim().toLowerCase();
@@ -189,12 +201,13 @@ function App() {
       });
   }, [internDirectory, internSearch, mentorLinks]);
 
-  const internNameMap = useMemo(() => {
-    return internDirectory.reduce((accumulator, user) => {
-      accumulator[user.id] = buildUserFullName(user);
-      return accumulator;
-    }, {});
-  }, [internDirectory]);
+  const mentorDisplayName = useMemo(() => {
+    if (!myMentorLink?.mentor_id) {
+      return '';
+    }
+
+    return userNameMap[myMentorLink.mentor_id] || shortId(myMentorLink.mentor_id);
+  }, [myMentorLink?.mentor_id, userNameMap]);
 
   async function bootstrap() {
     setBootstrapping(true);
@@ -220,7 +233,7 @@ function App() {
     }
   }
 
-  function navigateTo(nextRoute, replace = false) {
+  function navigateTo(nextRoute, replace = false, preserveMessage = false) {
     if (nextRoute === route) {
       return;
     }
@@ -228,7 +241,9 @@ function App() {
     const method = replace ? 'replaceState' : 'pushState';
     window.history[method]({}, '', nextRoute);
     setRoute(nextRoute);
-    setMessage('');
+    if (!preserveMessage) {
+      setMessage('');
+    }
   }
 
   function updateSession(nextSession) {
@@ -319,16 +334,15 @@ function App() {
       setBoardColumns(Array.isArray(fetchedBoard) ? fetchedBoard : []);
 
       try {
-        const fetchedInterns = await authRequest('/profile', {
+        const fetchedUsers = await authRequest('/profile', {
           token: session.access_token,
           query: {
-            filter_role: 'intern',
             limit: 200,
           },
         });
-        setInternDirectory(Array.isArray(fetchedInterns) ? fetchedInterns : []);
+        setUserDirectory(Array.isArray(fetchedUsers) ? fetchedUsers : []);
       } catch {
-        setInternDirectory([]);
+        setUserDirectory([]);
       }
 
       if (currentUser.role === 'mentor') {
@@ -419,6 +433,7 @@ function App() {
       setBoardColumns([]);
       setStatuses([]);
       setMentorLinks([]);
+      setUserDirectory([]);
       setMyMentorLink(null);
       setSelectedTask(null);
       if (route === ROUTES.home) {
@@ -447,6 +462,11 @@ function App() {
         }
       } catch (error) {
         if (!cancelled) {
+          if (error?.status === 401 || error?.status === 403) {
+            handleLogout('Сессия истекла. Выполнен автоматический выход.');
+            return;
+          }
+
           setMessage(getErrorMessage(error));
         }
       }
@@ -457,7 +477,33 @@ function App() {
     return () => {
       cancelled = true;
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route, session]);
+
+  useEffect(() => {
+    return registerAuthFailureHandler(() => {
+      handleLogout('Сессия истекла. Выполнен автоматический выход.');
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route, session]);
+
+  useEffect(() => {
+    if (!session?.access_token) {
+      return undefined;
+    }
+
+    function handleTabClose() {
+      clearSession();
+    }
+
+    window.addEventListener('beforeunload', handleTabClose);
+    window.addEventListener('pagehide', handleTabClose);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleTabClose);
+      window.removeEventListener('pagehide', handleTabClose);
+    };
+  }, [session?.access_token]);
 
   useEffect(() => {
     if (!session?.access_token || !currentUser || route !== ROUTES.home) {
@@ -468,12 +514,12 @@ function App() {
   }, [currentUser, loadDashboardData, route, session?.access_token]);
 
   useEffect(() => {
-    if (!selectedTask || !session?.access_token) {
+    if (!selectedTask?.id || !session?.access_token) {
       return;
     }
 
     loadTaskDetails(selectedTask.id);
-  }, [loadTaskDetails, selectedTask, session?.access_token]);
+  }, [loadTaskDetails, selectedTask?.id, session?.access_token]);
 
   useEffect(() => {
     setTaskDraft(buildTaskDraft(selectedTask));
@@ -545,11 +591,26 @@ function App() {
     }
   }
 
-  function handleLogout() {
+  function resetSelectedTask() {
+    setSelectedTask(null);
+    setTaskComments([]);
+    setTaskLinks([]);
+    setTaskAttachments([]);
+    setTaskDraft(buildTaskDraft(null));
+  }
+
+  function handleLogout(nextMessage = '') {
     updateSession(null);
     setCurrentUser(null);
-    setMessage('');
-    navigateTo(ROUTES.login, true);
+    setUserDirectory([]);
+    setMentorLinks([]);
+    setMyMentorLink(null);
+    resetSelectedTask();
+    setIsChatOpen(false);
+    setIsTaskModalOpen(false);
+    setIsStatusModalOpen(false);
+    setMessage(nextMessage);
+    navigateTo(ROUTES.login, true, Boolean(nextMessage));
   }
 
   async function handleAssignIntern(event) {
@@ -744,10 +805,7 @@ function App() {
     );
 
     if (data !== null) {
-      setSelectedTask(null);
-      setTaskComments([]);
-      setTaskLinks([]);
-      setTaskAttachments([]);
+      resetSelectedTask();
       await loadDashboardData();
     }
   }
@@ -941,7 +999,7 @@ function App() {
                   : 'Следите за задачами по статусам и открывайте детали в боковой панели.'}
               </p>
               {currentUser?.role === 'intern' && myMentorLink && (
-                <p className="auth-subtitle">Mentor: {shortId(myMentorLink.mentor_id)}</p>
+                <p className="auth-subtitle">Mentor: {mentorDisplayName}</p>
               )}
             </div>
 
@@ -1071,7 +1129,8 @@ function App() {
               </div>
               <TaskBoard
                 boardColumns={boardColumns}
-                internNameMap={internNameMap}
+                userMap={userMap}
+                userNameMap={userNameMap}
                 onMoveTask={handleMoveTask}
                 onSelectTask={setSelectedTask}
                 selectedTask={selectedTask}
@@ -1089,9 +1148,10 @@ function App() {
         currentUser={currentUser}
         linkForm={linkForm}
         mentorLinks={mentorLinks}
-        internNameMap={internNameMap}
+        userMap={userMap}
+        userNameMap={userNameMap}
         onAttachmentDraftChange={updateAttachmentDraft}
-        onClose={() => setSelectedTask(null)}
+        onClose={resetSelectedTask}
         onCommentChange={(event) =>
           setCommentForm({ content: event.target.value })
         }
@@ -1117,7 +1177,9 @@ function App() {
 
       <ChatModal
         currentUser={currentUser}
-        internNameMap={internNameMap}
+        myMentorId={myMentorLink?.mentor_id || ''}
+        userMap={userMap}
+        userNameMap={userNameMap}
         mentorInternOptions={visibleInternOptions}
         onClose={() => setIsChatOpen(false)}
         open={isChatOpen}

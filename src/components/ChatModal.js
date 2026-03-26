@@ -1,6 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { chatRequest } from '../api';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { chatRequest, chatWebSocketUrl } from '../api';
 import { getDownloadUrl, uploadFileAsset } from '../fileService';
+import { buildUserFullName, shortId } from '../shared/lib/user';
+import { UserAvatar } from '../shared/ui/UserAvatar';
 
 function formatTime(value) {
   if (!value) {
@@ -14,25 +16,58 @@ function formatTime(value) {
   }
 }
 
-function buildConversationLabel(conversation, currentUser, internNameMap) {
+function mergeConversation(current, nextConversation) {
+  const withoutCurrent = current.filter((item) => item.id !== nextConversation.id);
+  return [nextConversation, ...withoutCurrent];
+}
+
+function appendUniqueMessage(current, nextMessage) {
+  if (current.some((item) => item.id === nextMessage.id)) {
+    return current;
+  }
+  return [...current, nextMessage];
+}
+
+function getConversationUser(conversation, currentUser, userMap, myMentorId) {
+  if (!conversation) {
+    return null;
+  }
+
+  if (currentUser?.role === 'intern' && myMentorId) {
+    return userMap?.[myMentorId] || { id: myMentorId };
+  }
+
+  const otherParticipantId = (conversation.participant_ids || []).find(
+    (participantId) => participantId !== currentUser?.id
+  );
+
+  return otherParticipantId ? userMap?.[otherParticipantId] || { id: otherParticipantId } : null;
+}
+
+function buildConversationLabel(conversation, currentUser, userMap, myMentorId) {
   if (conversation.title) {
     return conversation.title;
   }
 
   if (conversation.type === 'group') {
-    return 'Групповой чат';
+    const participants = (conversation.intern_ids || [])
+      .map((participantId) => buildUserFullName(userMap?.[participantId] || { id: participantId }))
+      .filter(Boolean);
+
+    return participants.length > 0 ? participants.join(', ') : 'Групповой чат';
   }
 
-  if (currentUser?.role === 'mentor') {
-    return internNameMap?.[conversation.intern_ids?.[0]] || 'Личный чат';
-  }
-
-  return 'Чат с ментором';
+  return (
+    buildUserFullName(getConversationUser(conversation, currentUser, userMap, myMentorId)) ||
+    'Личный чат'
+  );
 }
 
 export function ChatModal({
   currentUser,
-  internNameMap,
+  myMentorId,
+  userMap,
+  userNameMap,
   mentorInternOptions,
   open,
   onClose,
@@ -49,6 +84,8 @@ export function ChatModal({
   const [groupTitle, setGroupTitle] = useState('');
   const [groupInternIds, setGroupInternIds] = useState([]);
   const [chatError, setChatError] = useState('');
+  const userSocketRef = useRef(null);
+  const conversationSocketRef = useRef(null);
 
   const selectedConversation = useMemo(
     () => conversations.find((item) => item.id === selectedConversationId) || null,
@@ -91,11 +128,9 @@ export function ChatModal({
     }
 
     loadConversations();
-    const intervalId = window.setInterval(loadConversations, 5000);
 
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
     };
   }, [open, token]);
 
@@ -123,11 +158,78 @@ export function ChatModal({
     }
 
     loadMessages();
-    const intervalId = window.setInterval(loadMessages, 4000);
 
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
+    };
+  }, [open, selectedConversationId, token]);
+
+  useEffect(() => {
+    if (!open || !token) {
+      return undefined;
+    }
+
+    const socket = new WebSocket(chatWebSocketUrl('/ws/updates', token));
+    userSocketRef.current = socket;
+
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'conversation.updated' && payload.data) {
+          setConversations((current) => mergeConversation(current, payload.data));
+        }
+      } catch {
+        setChatError('Не удалось обработать websocket-событие чата');
+      }
+    };
+
+    socket.onerror = () => {
+      setChatError('WebSocket подключения к списку чатов недоступны');
+    };
+
+    return () => {
+      socket.close();
+      userSocketRef.current = null;
+    };
+  }, [open, token]);
+
+  useEffect(() => {
+    if (!open || !selectedConversationId || !token) {
+      return undefined;
+    }
+
+    const socket = new WebSocket(
+      chatWebSocketUrl(`/ws/conversations/${selectedConversationId}`, token)
+    );
+    conversationSocketRef.current = socket;
+
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+
+        if (payload.type === 'message.created' && payload.data) {
+          setMessages((current) => appendUniqueMessage(current, payload.data));
+        }
+
+        if (payload.type === 'conversation.updated' && payload.data) {
+          setConversations((current) => mergeConversation(current, payload.data));
+        }
+
+        if (payload.type === 'error') {
+          setChatError(payload.detail || 'Ошибка websocket чата');
+        }
+      } catch {
+        setChatError('Не удалось обработать websocket-сообщение');
+      }
+    };
+
+    socket.onerror = () => {
+      setChatError('WebSocket подключения к сообщениям недоступны');
+    };
+
+    return () => {
+      socket.close();
+      conversationSocketRef.current = null;
     };
   }, [open, selectedConversationId, token]);
 
@@ -153,10 +255,7 @@ export function ChatModal({
         token,
         body: { intern_id: targetInternId },
       });
-      setConversations((current) => {
-        const next = [conversation, ...current.filter((item) => item.id !== conversation.id)];
-        return next;
-      });
+      setConversations((current) => mergeConversation(current, conversation));
       setSelectedConversationId(conversation.id);
       setDirectInternId('');
       setChatError('');
@@ -179,7 +278,7 @@ export function ChatModal({
           intern_ids: groupInternIds,
         },
       });
-      setConversations((current) => [conversation, ...current]);
+      setConversations((current) => mergeConversation(current, conversation));
       setSelectedConversationId(conversation.id);
       setGroupTitle('');
       setGroupInternIds([]);
@@ -207,19 +306,31 @@ export function ChatModal({
           size: uploaded.size,
         });
       }
+
       const payload = {
+        action: 'message.send',
         content: chatMessage,
         attachments: uploadedAttachments,
       };
-      const message = await chatRequest(
-        `/conversations/${selectedConversationId}/messages`,
-        {
-          method: 'POST',
-          token,
-          body: payload,
-        }
-      );
-      setMessages((current) => [...current, message]);
+
+      const socket = conversationSocketRef.current;
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(payload));
+      } else {
+        const message = await chatRequest(
+          `/conversations/${selectedConversationId}/messages`,
+          {
+            method: 'POST',
+            token,
+            body: {
+              content: chatMessage,
+              attachments: uploadedAttachments,
+            },
+          }
+        );
+        setMessages((current) => appendUniqueMessage(current, message));
+      }
+
       setChatMessage('');
       setMessageFiles([]);
       setChatError('');
@@ -237,6 +348,7 @@ export function ChatModal({
   return (
     <div className="chat-modal-backdrop" onClick={onClose} role="presentation">
       <section
+        aria-modal="true"
         className="chat-modal"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
@@ -244,7 +356,7 @@ export function ChatModal({
         <div className="chat-modal-head">
           <div>
             <p className="auth-kicker">CHAT</p>
-            <h3>Чат ментора и стажёров</h3>
+            <h3>Чаты наставников и сотрудников</h3>
           </div>
           <button className="icon-button" onClick={onClose} type="button">
             Закрыть
@@ -264,7 +376,7 @@ export function ChatModal({
                         onChange={(event) => setDirectInternId(event.target.value)}
                         value={directInternId}
                       >
-                        <option value="">Выберите стажёра</option>
+                        <option value="">Выберите сотрудника</option>
                         {mentorInternOptions.map((intern) => (
                           <option key={intern.value} value={intern.value}>
                             {intern.label}
@@ -274,7 +386,7 @@ export function ChatModal({
                     </label>
                   ) : (
                     <p className="auth-subtitle">
-                      Если чата ещё нет, откройте личный диалог со своим ментором.
+                      Если личного чата ещё нет, откройте диалог со своим ментором.
                     </p>
                   )}
                   <button className="secondary-button" onClick={handleCreateDirectChat} type="button">
@@ -300,6 +412,7 @@ export function ChatModal({
                               onChange={() => toggleGroupIntern(intern.value)}
                               type="checkbox"
                             />
+                            <UserAvatar size="xs" user={intern.user} />
                             <span>{intern.label}</span>
                           </label>
                         ))}
@@ -315,21 +428,38 @@ export function ChatModal({
 
             <div className="chat-conversation-list">
               {chatLoading && <div className="inline-note">Загрузка чатов...</div>}
-              {conversations.map((conversation) => (
-                <button
-                  className={`chat-conversation-item ${
-                    selectedConversationId === conversation.id ? 'active' : ''
-                  }`}
-                  key={conversation.id}
-                  onClick={() => setSelectedConversationId(conversation.id)}
-                  type="button"
-                >
-                  <strong>
-                    {buildConversationLabel(conversation, currentUser, internNameMap)}
-                  </strong>
-                  <span>{conversation.last_message_preview || 'Без сообщений'}</span>
-                </button>
-              ))}
+              {conversations.map((conversation) => {
+                const conversationUser = getConversationUser(
+                  conversation,
+                  currentUser,
+                  userMap,
+                  myMentorId
+                );
+
+                return (
+                  <button
+                    className={`chat-conversation-item ${
+                      selectedConversationId === conversation.id ? 'active' : ''
+                    }`}
+                    key={conversation.id}
+                    onClick={() => setSelectedConversationId(conversation.id)}
+                    type="button"
+                  >
+                    <div className="chat-conversation-top">
+                      <UserAvatar size="sm" user={conversationUser || { id: conversation.id }} />
+                      <div>
+                        <strong>
+                          {buildConversationLabel(conversation, currentUser, userMap, myMentorId)}
+                        </strong>
+                        <span>{conversation.type === 'group' ? 'Группа' : 'Личный чат'}</span>
+                      </div>
+                    </div>
+                    <p className="chat-preview">
+                      {conversation.last_message_preview || 'Пока без сообщений'}
+                    </p>
+                  </button>
+                );
+              })}
             </div>
           </aside>
 
@@ -338,47 +468,62 @@ export function ChatModal({
               <>
                 <div className="chat-main-head">
                   <div>
-                    <h4>{buildConversationLabel(selectedConversation, currentUser, internNameMap)}</h4>
+                    <h4>
+                      {buildConversationLabel(selectedConversation, currentUser, userMap, myMentorId)}
+                    </h4>
                     <p className="auth-subtitle">
-                      {selectedConversation.type === 'group' ? 'Групповой чат' : 'Личный чат'}
+                      {selectedConversation.type === 'group'
+                        ? 'Групповой диалог'
+                        : 'Личная переписка'}
                     </p>
                   </div>
                 </div>
 
                 <div className="chat-messages">
-                  {messages.map((message) => (
-                    <article
-                      className={`chat-message ${
-                        message.sender_id === currentUser?.id ? 'own' : ''
-                      }`}
-                      key={message.id}
-                    >
-                      <strong>
-                        {message.sender_id === currentUser?.id
-                          ? 'Вы'
-                          : internNameMap?.[message.sender_id] || 'Собеседник'}
-                      </strong>
-                      {message.content && <p>{message.content}</p>}
-                      {message.attachments?.length > 0 && (
-                        <div className="chat-attachments">
-                          {message.attachments.map((attachment) => (
-                            <button
-                              className="detail-badge subtle attachment-badge"
-                              key={attachment.id}
-                              onClick={async () => {
-                                const response = await getDownloadUrl(token, attachment.file_id);
-                                window.open(response.download_url, '_blank', 'noopener,noreferrer');
-                              }}
-                              type="button"
-                            >
-                              {attachment.file_name}
-                            </button>
-                          ))}
+                  {messages.map((message) => {
+                    const author = userMap?.[message.sender_id] || { id: message.sender_id };
+                    const authorName =
+                      message.sender_id === currentUser?.id
+                        ? 'Вы'
+                        : userNameMap?.[message.sender_id] ||
+                          buildUserFullName(author) ||
+                          shortId(message.sender_id);
+
+                    return (
+                      <article
+                        className={`chat-message ${
+                          message.sender_id === currentUser?.id ? 'own' : ''
+                        }`}
+                        key={message.id}
+                      >
+                        <div className="chat-message-head">
+                          <div className="chat-author">
+                            <UserAvatar size="xs" user={author} />
+                            <strong>{authorName}</strong>
+                          </div>
+                          <span>{formatTime(message.created_at)}</span>
                         </div>
-                      )}
-                      <span>{formatTime(message.created_at)}</span>
-                    </article>
-                  ))}
+                        {message.content && <p>{message.content}</p>}
+                        {message.attachments?.length > 0 && (
+                          <div className="chat-attachments">
+                            {message.attachments.map((attachment) => (
+                              <button
+                                className="detail-badge subtle attachment-badge"
+                                key={attachment.id}
+                                onClick={async () => {
+                                  const response = await getDownloadUrl(token, attachment.file_id);
+                                  window.open(response.download_url, '_blank', 'noopener,noreferrer');
+                                }}
+                                type="button"
+                              >
+                                {attachment.file_name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
                 </div>
 
                 <form className="chat-composer" onSubmit={handleSendMessage}>
