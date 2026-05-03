@@ -53,6 +53,11 @@ const EMPTY_ATTACHMENT_FORM = {
 };
 
 const EMPTY_INTERN_SEARCH = '';
+const EMPTY_PROFILE_FORM = {
+  first_name: '',
+  last_name: '',
+  avatar_url: '',
+};
 
 const ROUTES = {
   home: '/',
@@ -60,6 +65,8 @@ const ROUTES = {
   register: '/register',
   materials: '/materials',
 };
+
+const SESSION_EXPIRED_MESSAGE = 'Сессия истекла. Выполнен автоматический выход.';
 
 function getPathname() {
   const { pathname } = window.location;
@@ -84,6 +91,61 @@ function buildTaskDraft(task) {
     description: task?.description || '',
     status_id: task?.status_id || '',
     intern_id: task?.intern_id || '',
+  };
+}
+
+const SESSION_EXPIRED_COPY =
+  typeof SESSION_EXPIRED_MESSAGE === 'string' &&
+  !SESSION_EXPIRED_MESSAGE.includes('Р')
+    ? SESSION_EXPIRED_MESSAGE
+    : 'Сессия истекла. Выполнен автоматический выход.';
+
+function profileAvatarKey(userId) {
+  return `mentor-desk-avatar-${userId}`;
+}
+
+function loadLocalAvatar(userId) {
+  if (!userId) {
+    return '';
+  }
+
+  try {
+    return window.localStorage.getItem(profileAvatarKey(userId)) || '';
+  } catch {
+    return '';
+  }
+}
+
+function saveLocalAvatar(userId, avatarUrl) {
+  if (!userId) {
+    return;
+  }
+
+  try {
+    if (avatarUrl) {
+      window.localStorage.setItem(profileAvatarKey(userId), avatarUrl);
+    } else {
+      window.localStorage.removeItem(profileAvatarKey(userId));
+    }
+  } catch {
+    // ignore local storage errors
+  }
+}
+
+function withLocalAvatar(user) {
+  if (!user) {
+    return user;
+  }
+
+  const avatarUrl = loadLocalAvatar(user.id);
+
+  if (!avatarUrl) {
+    return user;
+  }
+
+  return {
+    ...user,
+    avatar_url: avatarUrl,
   };
 }
 
@@ -147,6 +209,8 @@ function App() {
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [profileForm, setProfileForm] = useState(EMPTY_PROFILE_FORM);
 
   const selectedTaskColumnName = useMemo(
     () =>
@@ -154,23 +218,28 @@ function App() {
     [selectedTask?.status_id, statuses]
   );
 
-  const userMap = useMemo(() => {
-    return userDirectory.reduce((accumulator, user) => {
-      accumulator[user.id] = user;
-      return accumulator;
-    }, {});
-  }, [userDirectory]);
+  const userMap = useMemo(
+    () =>
+      userDirectory.reduce((accumulator, user) => {
+        accumulator[user.id] = user;
+        return accumulator;
+      }, {}),
+    [userDirectory]
+  );
 
-  const userNameMap = useMemo(() => {
-    return userDirectory.reduce((accumulator, user) => {
-      accumulator[user.id] = buildUserFullName(user);
-      return accumulator;
-    }, {});
-  }, [userDirectory]);
+  const userNameMap = useMemo(
+    () =>
+      userDirectory.reduce((accumulator, user) => {
+        accumulator[user.id] = buildUserFullName(user);
+        return accumulator;
+      }, {}),
+    [userDirectory]
+  );
 
-  const internDirectory = useMemo(() => {
-    return userDirectory.filter((user) => user.role === 'intern');
-  }, [userDirectory]);
+  const internDirectory = useMemo(
+    () => userDirectory.filter((user) => user.role === 'intern'),
+    [userDirectory]
+  );
 
   const visibleInternOptions = useMemo(() => {
     if (currentUser?.role !== 'mentor') {
@@ -208,6 +277,16 @@ function App() {
 
     return userNameMap[myMentorLink.mentor_id] || shortId(myMentorLink.mentor_id);
   }, [myMentorLink?.mentor_id, userNameMap]);
+
+  const totalTasks = useMemo(
+    () => boardColumns.reduce((total, column) => total + column.tasks.length, 0),
+    [boardColumns]
+  );
+
+  const allBoardTasks = useMemo(
+    () => boardColumns.flatMap((column) => column.tasks || []),
+    [boardColumns]
+  );
 
   async function bootstrap() {
     setBootstrapping(true);
@@ -336,11 +415,13 @@ function App() {
       try {
         const fetchedUsers = await authRequest('/profile', {
           token: session.access_token,
-          query: {
-            limit: 200,
-          },
+          query: { limit: 200 },
         });
-        setUserDirectory(Array.isArray(fetchedUsers) ? fetchedUsers : []);
+        setUserDirectory(
+          Array.isArray(fetchedUsers)
+            ? fetchedUsers.map((user) => withLocalAvatar(user))
+            : []
+        );
       } catch {
         setUserDirectory([]);
       }
@@ -386,18 +467,10 @@ function App() {
   const loadTaskDetails = useCallback(async (taskId) => {
     try {
       const [task, comments, links, attachments] = await Promise.all([
-        coreRequest(`/tasks/${taskId}`, {
-          token: session.access_token,
-        }),
-        coreRequest(`/tasks/${taskId}/comments`, {
-          token: session.access_token,
-        }),
-        coreRequest(`/tasks/${taskId}/links`, {
-          token: session.access_token,
-        }),
-        coreRequest(`/tasks/${taskId}/attachments`, {
-          token: session.access_token,
-        }),
+        coreRequest(`/tasks/${taskId}`, { token: session.access_token }),
+        coreRequest(`/tasks/${taskId}/comments`, { token: session.access_token }),
+        coreRequest(`/tasks/${taskId}/links`, { token: session.access_token }),
+        coreRequest(`/tasks/${taskId}/attachments`, { token: session.access_token }),
       ]);
 
       setSelectedTask(task);
@@ -418,13 +491,9 @@ function App() {
     }
 
     window.addEventListener('popstate', handlePopState);
-
-    return () => {
-      window.removeEventListener('popstate', handlePopState);
-    };
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const accessToken = session?.access_token;
 
@@ -452,7 +521,7 @@ function App() {
         });
 
         if (!cancelled) {
-          setCurrentUser(data);
+          setCurrentUser(withLocalAvatar(data));
           if (data?.role && session?.role !== data.role) {
             updateSession({
               ...session,
@@ -463,7 +532,7 @@ function App() {
       } catch (error) {
         if (!cancelled) {
           if (error?.status === 401 || error?.status === 403) {
-            handleLogout('Сессия истекла. Выполнен автоматический выход.');
+            handleLogout(SESSION_EXPIRED_COPY);
             return;
           }
 
@@ -473,19 +542,16 @@ function App() {
     }
 
     syncCurrentUser();
-
     return () => {
       cancelled = true;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route, session]);
+  }, [route, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     return registerAuthFailureHandler(() => {
-      handleLogout('Сессия истекла. Выполнен автоматический выход.');
+      handleLogout(SESSION_EXPIRED_COPY);
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route, session]);
+  }, [route, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!session?.access_token) {
@@ -498,7 +564,6 @@ function App() {
 
     window.addEventListener('beforeunload', handleTabClose);
     window.addEventListener('pagehide', handleTabClose);
-
     return () => {
       window.removeEventListener('beforeunload', handleTabClose);
       window.removeEventListener('pagehide', handleTabClose);
@@ -524,6 +589,19 @@ function App() {
   useEffect(() => {
     setTaskDraft(buildTaskDraft(selectedTask));
   }, [selectedTask]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setProfileForm(EMPTY_PROFILE_FORM);
+      return;
+    }
+
+    setProfileForm({
+      first_name: currentUser.first_name || '',
+      last_name: currentUser.last_name || '',
+      avatar_url: currentUser.avatar_url || '',
+    });
+  }, [currentUser]);
 
   async function handleRegister(event) {
     event.preventDefault();
@@ -568,35 +646,84 @@ function App() {
     }
   }
 
-  async function handleRefreshToken() {
-    if (!session?.refresh_token) {
-      setMessage('Sign in first to refresh the token.');
-      return;
-    }
-
-    const nextAccessToken = await runRequest(
-      () =>
-        authRequest('/auth/token/refresh', {
-          method: 'POST',
-          query: { token: session.refresh_token },
-        }),
-      'Access token refreshed.'
-    );
-
-    if (nextAccessToken) {
-      updateSession({
-        ...session,
-        access_token: nextAccessToken,
-      });
-    }
-  }
-
   function resetSelectedTask() {
     setSelectedTask(null);
     setTaskComments([]);
     setTaskLinks([]);
     setTaskAttachments([]);
     setTaskDraft(buildTaskDraft(null));
+  }
+
+  function updateProfileForm(event) {
+    const { name, value } = event.target;
+    setProfileForm((current) => ({ ...current, [name]: value }));
+  }
+
+  async function handleProfileAvatarChange(event) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Не удалось прочитать файл.'));
+      reader.readAsDataURL(file);
+    });
+
+    setProfileForm((current) => ({
+      ...current,
+      avatar_url: typeof dataUrl === 'string' ? dataUrl : '',
+    }));
+  }
+
+  async function handleSaveProfile(event) {
+    event.preventDefault();
+    if (!currentUser?.id) {
+      return;
+    }
+
+    const updatedUser = await runRequest(
+      () =>
+        authRequest('/profile', {
+          method: 'PATCH',
+          token: session.access_token,
+          query: { user_id: currentUser.id },
+          body: {
+            first_name: profileForm.first_name,
+            last_name: profileForm.last_name,
+          },
+        }),
+      'Профиль обновлён.'
+    );
+
+    if (!updatedUser) {
+      return;
+    }
+
+    saveLocalAvatar(currentUser.id, profileForm.avatar_url);
+
+    const nextUser = withLocalAvatar({
+      ...currentUser,
+      ...updatedUser,
+      avatar_url: profileForm.avatar_url,
+    });
+
+    setCurrentUser(nextUser);
+    setUserDirectory((current) =>
+      current.map((user) => (user.id === nextUser.id ? nextUser : user))
+    );
+    setIsProfileModalOpen(false);
+  }
+
+  function handleOpenTaskFromChat(taskId) {
+    if (!taskId) {
+      return;
+    }
+
+    setIsChatOpen(false);
+    setSelectedTask((current) => (current?.id === taskId ? current : { id: taskId }));
   }
 
   function handleLogout(nextMessage = '') {
@@ -737,13 +864,7 @@ function App() {
       if (column.status.id === nextStatusId) {
         return {
           ...column,
-          tasks: [
-            {
-              ...task,
-              status_id: nextStatusId,
-            },
-            ...column.tasks,
-          ],
+          tasks: [{ ...task, status_id: nextStatusId }, ...column.tasks],
         };
       }
 
@@ -948,27 +1069,53 @@ function App() {
     return (
       <>
         <main className="auth-layout">
-          <section className="auth-card">
-            {route === ROUTES.login && (
-              <LoginScreen
-                loading={loading}
-                loginForm={loginForm}
-                onChange={updateLoginForm}
-                onNavigateRegister={() => navigateTo(ROUTES.register)}
-                onSubmit={handleLogin}
-              />
-            )}
-            {route === ROUTES.register && (
-              <RegisterScreen
-                loading={loading}
-                onChange={updateRegisterForm}
-                onNavigateLogin={() => navigateTo(ROUTES.login)}
-                onSubmit={handleRegister}
-                registerForm={registerForm}
-                roles={roles}
-              />
-            )}
-            {message && <p className="auth-message">{message}</p>}
+          <section className="auth-shell">
+            <aside className="auth-showcase">
+              <div className="auth-showcase-mark">Mentor Desk</div>
+              <p className="auth-kicker">РАБОЧЕЕ ПРОСТРАНСТВО</p>
+              <h2>Управление стажировкой в одном рабочем окне.</h2>
+              <p className="auth-subtitle">
+                Доска задач, чат, материалы и контроль прогресса собраны в
+                единой рабочей среде в духе Jira.
+              </p>
+              <div className="auth-showcase-grid">
+                <article className="auth-showcase-card">
+                  <strong>Канбан-доска</strong>
+                  <span>Статусы, drag-and-drop и правая detail-панель.</span>
+                </article>
+                <article className="auth-showcase-card">
+                  <strong>Чаты</strong>
+                  <span>Личные и групповые диалоги с мгновенной доставкой.</span>
+                </article>
+                <article className="auth-showcase-card">
+                  <strong>Материалы</strong>
+                  <span>Файлы, вложения и материалы для стажёров.</span>
+                </article>
+              </div>
+            </aside>
+
+            <section className="auth-card auth-panel">
+              {route === ROUTES.login && (
+                <LoginScreen
+                  loading={loading}
+                  loginForm={loginForm}
+                  onChange={updateLoginForm}
+                  onNavigateRegister={() => navigateTo(ROUTES.register)}
+                  onSubmit={handleLogin}
+                />
+              )}
+              {route === ROUTES.register && (
+                <RegisterScreen
+                  loading={loading}
+                  onChange={updateRegisterForm}
+                  onNavigateLogin={() => navigateTo(ROUTES.login)}
+                  onSubmit={handleRegister}
+                  registerForm={registerForm}
+                  roles={roles}
+                />
+              )}
+              {message && <p className="auth-message">{message}</p>}
+            </section>
           </section>
         </main>
 
@@ -984,161 +1131,248 @@ function App() {
   return (
     <>
       <main className="dashboard-layout">
-        <section className="dashboard-shell jira-shell">
-          <header className="dashboard-header jira-header">
-            <div className="header-copy">
-              <p className="auth-kicker">WORK ITEMS</p>
-              <h1>
-                {currentUser?.first_name
-                  ? `Здравствуйте, ${currentUser.first_name}`
-                  : 'Task board'}
-              </h1>
-              <p className="auth-subtitle">
-                {currentUser?.role === 'mentor'
-                  ? 'Колонки работают как в Jira: открывайте карточку справа и перетаскивайте задачи между статусами.'
-                  : 'Следите за задачами по статусам и открывайте детали в боковой панели.'}
-              </p>
-              {currentUser?.role === 'intern' && myMentorLink && (
-                <p className="auth-subtitle">Mentor: {mentorDisplayName}</p>
-              )}
+        <section className="workspace-frame">
+          <aside className="workspace-rail">
+            <div className="workspace-brand">
+              <span className="workspace-brand-mark">M</span>
+              <div>
+                <strong>Mentor Desk</strong>
+                <span>Рабочее пространство</span>
+              </div>
             </div>
 
-            <div className="header-actions jira-actions">
+            <div className="workspace-nav">
+              <button className="workspace-nav-item active" type="button">
+                Доска
+              </button>
               <button
-                className="secondary-button"
+                className="workspace-nav-item"
                 onClick={() => navigateTo(ROUTES.materials)}
                 type="button"
               >
-                МАТЕРИАЛЫ
+                Материалы
               </button>
-              {currentUser?.role === 'mentor' && (
-                <>
-                  <button
-                    className="primary-button"
-                    onClick={() => setIsTaskModalOpen(true)}
-                    type="button"
-                  >
-                    Создание задачи
-                  </button>
-                  <button
-                    className="secondary-button"
-                    onClick={() => setIsStatusModalOpen(true)}
-                    type="button"
-                  >
-                    Добавление статуса
-                  </button>
-                </>
-              )}
-              <select
-                className="header-select"
-                onChange={(event) => setSelectedStatusFilter(event.target.value)}
-                value={selectedStatusFilter}
+              <button
+                className="workspace-nav-item"
+                onClick={() => setIsChatOpen(true)}
+                type="button"
               >
-                <option value="">Все статусы</option>
-                {statuses.map((status) => (
-                  <option key={status.id} value={status.id}>
-                    {status.name}
-                  </option>
-                ))}
-              </select>
-              {currentUser?.role === 'mentor' && (
-                <select
-                  className="header-select"
-                  onChange={(event) => setSelectedInternId(event.target.value)}
-                  value={selectedInternId}
-                >
-                  <option value="">Все исполнители</option>
-                  {visibleInternOptions.map((intern) => (
-                    <option key={intern.id} value={intern.value}>
-                      {intern.label}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <button className="secondary-button" onClick={loadDashboardData} type="button">
-                Обновить
-              </button>
-              <button className="secondary-button" onClick={() => setIsChatOpen(true)} type="button">
-                ЧАТ
-              </button>
-              <button className="secondary-button" onClick={handleRefreshToken} type="button">
-                Refresh token
-              </button>
-              <button className="ghost-button" onClick={handleLogout} type="button">
-                Logout
+                Чаты
               </button>
             </div>
-          </header>
 
-          {currentUser?.role === 'mentor' && (
-            <section className="dashboard-card helper-bar">
-              <div className="helper-grid">
-                <div>
-                  <p className="auth-kicker">MENTOR ACCESS</p>
-                  <h3>Привязка стажёра</h3>
-                  <p className="auth-subtitle">
-                    Найдите стажёра по имени или фамилии и привяжите его к ментору.
-                  </p>
-                </div>
-                <form className="inline-form" onSubmit={handleAssignIntern}>
-                  <div className="search-select">
-                    <input
-                      onChange={(event) => setInternSearch(event.target.value)}
-                      placeholder="Поиск стажёра"
-                      value={internSearch}
-                    />
-                    <div className="search-results">
-                      {filteredInternDirectory.slice(0, 8).map((intern) => (
-                        <button
-                          className={`search-result-item ${
-                            internAssignId === intern.id ? 'active' : ''
-                          }`}
-                          key={intern.id}
-                          onClick={() => setInternAssignId(intern.id)}
-                          type="button"
-                        >
-                          <strong>{buildUserFullName(intern)}</strong>
-                          <span>{intern.email || shortId(intern.id)}</span>
-                        </button>
-                      ))}
-                      {filteredInternDirectory.length === 0 && (
-                        <div className="search-result-empty">Ничего не найдено</div>
-                      )}
-                    </div>
-                  </div>
-                  <button className="primary-button" disabled={loading} type="submit">
-                    Assign intern
-                  </button>
-                </form>
+            <div className="workspace-user-card">
+              <span className="workspace-user-role">
+                {currentUser?.role === 'mentor' ? 'Наставник' : 'Стажёр'}
+              </span>
+              <strong>{buildUserFullName(currentUser || {})}</strong>
+              <span>{currentUser?.email || 'Нет почты'}</span>
+              <button
+                className="secondary-button workspace-profile-button"
+                onClick={() => setIsProfileModalOpen(true)}
+                type="button"
+              >
+                Профиль
+              </button>
+              <button className="ghost-button workspace-logout" onClick={handleLogout} type="button">
+                Выйти
+              </button>
+            </div>
+          </aside>
+
+          <section className="dashboard-shell jira-shell">
+            <header className="workspace-topbar">
+              <div className="workspace-topbar-copy">
+                <p className="auth-kicker">ДОСКА ЗАДАЧ</p>
+                <h1>
+                  {currentUser?.first_name
+                    ? `${currentUser.first_name}, фокус на текущих задачах`
+                    : 'Доска задач'}
+                </h1>
+                <p className="auth-subtitle">
+                  {currentUser?.role === 'mentor'
+                    ? 'Управляйте выполнением, перемещайте карточки между статусами и держите стажёров в едином рабочем процессе.'
+                    : 'Следите за своими задачами, открывайте детали справа и оставайтесь на связи с наставником.'}
+                </p>
               </div>
-            </section>
-          )}
 
-          <div className={`dashboard-main jira-main ${selectedTask ? 'with-detail' : 'without-detail'}`}>
-            <section className="dashboard-card board-panel jira-board-panel">
-              <div className="section-head">
-                <div>
-                  <p className="auth-kicker">BOARD</p>
-                  <h3>Таблица задач по статусам</h3>
-                </div>
-                {boardLoading ? (
-                  <span className="inline-note">Загрузка...</span>
-                ) : (
-                  <span className="inline-note">{boardColumns.length} columns</span>
+              <div className="workspace-topbar-actions">
+                {currentUser?.role === 'mentor' && (
+                  <>
+                    <button
+                      className="primary-button"
+                      onClick={() => setIsTaskModalOpen(true)}
+                      type="button"
+                    >
+                      Создать задачу
+                    </button>
+                    <button
+                      className="secondary-button"
+                      onClick={() => setIsStatusModalOpen(true)}
+                      type="button"
+                    >
+                      Новый статус
+                    </button>
+                  </>
                 )}
+                <button className="secondary-button" onClick={loadDashboardData} type="button">
+                  Обновить
+                </button>
               </div>
-              <TaskBoard
-                boardColumns={boardColumns}
-                userMap={userMap}
-                userNameMap={userNameMap}
-                onMoveTask={handleMoveTask}
-                onSelectTask={setSelectedTask}
-                selectedTask={selectedTask}
-              />
-            </section>
-          </div>
+            </header>
 
-          {message && <p className="auth-message dashboard-message">{message}</p>}
+            <section className="workspace-content-grid">
+              <div className="workspace-main-column">
+                <section className="workspace-toolbar dashboard-card">
+                  <div className="workspace-toolbar-group">
+                    <span className="workspace-toolbar-label">Фильтры</span>
+                    <select
+                      className="header-select"
+                      onChange={(event) => setSelectedStatusFilter(event.target.value)}
+                      value={selectedStatusFilter}
+                    >
+                      <option value="">Все статусы</option>
+                      {statuses.map((status) => (
+                        <option key={status.id} value={status.id}>
+                          {status.name}
+                        </option>
+                      ))}
+                    </select>
+                    {currentUser?.role === 'mentor' && (
+                      <select
+                        className="header-select"
+                        onChange={(event) => setSelectedInternId(event.target.value)}
+                        value={selectedInternId}
+                      >
+                        <option value="">Все стажёры</option>
+                        {visibleInternOptions.map((intern) => (
+                          <option key={intern.id} value={intern.value}>
+                            {intern.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                  <div className="workspace-toolbar-group workspace-toolbar-meta">
+                    <span className="detail-badge">{totalTasks} задач</span>
+                    <span className="detail-badge subtle">{boardColumns.length} колонок</span>
+                  </div>
+                </section>
+
+                <section className="dashboard-card board-panel jira-board-panel board-shell-card">
+                  <div className="section-head">
+                    <div>
+                      <p className="auth-kicker">ТЕКУЩИЙ ПРОЦЕСС</p>
+                      <h3>Доска выполнения</h3>
+                    </div>
+                    {boardLoading ? (
+                      <span className="inline-note">Загрузка доски...</span>
+                    ) : (
+                      <span className="inline-note">
+                        Перетаскивайте задачи между колонками, чтобы обновлять прогресс
+                      </span>
+                    )}
+                  </div>
+                  <TaskBoard
+                    boardColumns={boardColumns}
+                    userMap={userMap}
+                    userNameMap={userNameMap}
+                    onMoveTask={handleMoveTask}
+                    onSelectTask={setSelectedTask}
+                    selectedTask={selectedTask}
+                  />
+                </section>
+
+                {message && <p className="auth-message dashboard-message">{message}</p>}
+              </div>
+
+              <aside className="workspace-side-column">
+                <section className="workspace-summary workspace-summary-card">
+                  <div className="workspace-sidecard-head">
+                    <p className="auth-kicker">ОБЗОР</p>
+                    <h3>Сводка по доске</h3>
+                  </div>
+                  <div className="workspace-kpis workspace-kpis-compact">
+                    <article className="workspace-kpi-card">
+                      <span>Всего задач</span>
+                      <strong>{totalTasks}</strong>
+                    </article>
+                    <article className="workspace-kpi-card">
+                      <span>Колонок</span>
+                      <strong>{statuses.length}</strong>
+                    </article>
+                    <article className="workspace-kpi-card">
+                      <span>Ваша роль</span>
+                      <strong>{currentUser?.role === 'mentor' ? 'Наставник' : 'Стажёр'}</strong>
+                    </article>
+                    {currentUser?.role === 'mentor' && (
+                      <article className="workspace-kpi-card">
+                        <span>Назначено стажёров</span>
+                        <strong>{mentorLinks.length}</strong>
+                      </article>
+                    )}
+                    {currentUser?.role === 'intern' && myMentorLink && (
+                      <article className="workspace-kpi-card">
+                        <span>Наставник</span>
+                        <strong>{mentorDisplayName}</strong>
+                      </article>
+                    )}
+                  </div>
+                </section>
+
+                {currentUser?.role === 'mentor' && (
+                  <section className="workspace-sidecard">
+                    <div className="workspace-sidecard-head">
+                      <p className="auth-kicker">ПРИВЯЗКА КОМАНДЫ</p>
+                      <h3>Назначить стажёра</h3>
+                    </div>
+                    <form className="workspace-sideform" onSubmit={handleAssignIntern}>
+                      <div className="search-select">
+                        <input
+                          onChange={(event) => setInternSearch(event.target.value)}
+                          placeholder="Найти стажёра"
+                          value={internSearch}
+                        />
+                        <div className="search-results search-results-compact">
+                          {filteredInternDirectory.slice(0, 6).map((intern) => (
+                            <button
+                              className={`search-result-item ${
+                                internAssignId === intern.id ? 'active' : ''
+                              }`}
+                              key={intern.id}
+                              onClick={() => setInternAssignId(intern.id)}
+                              type="button"
+                            >
+                              <strong>{buildUserFullName(intern)}</strong>
+                              <span>{intern.email || shortId(intern.id)}</span>
+                            </button>
+                          ))}
+                          {filteredInternDirectory.length === 0 && (
+                            <div className="search-result-empty">Ничего не найдено</div>
+                          )}
+                        </div>
+                      </div>
+                      <button className="primary-button" disabled={loading} type="submit">
+                        Назначить
+                      </button>
+                    </form>
+                  </section>
+                )}
+
+                <section className="workspace-sidecard workspace-guide-card">
+                  <div className="workspace-sidecard-head">
+                    <p className="auth-kicker">ПРОЦЕСС</p>
+                    <h3>Как работать с доской</h3>
+                  </div>
+                  <div className="workspace-guide-list">
+                    <span>Откройте задачу, чтобы редактировать детали, ссылки и вложения.</span>
+                    <span>Перемещайте карточки между статусами, чтобы обновлять прогресс.</span>
+                    <span>Используйте чаты и материалы через левую навигацию.</span>
+                  </div>
+                </section>
+              </aside>
+            </section>
+          </section>
         </section>
       </main>
 
@@ -1181,16 +1415,66 @@ function App() {
         userMap={userMap}
         userNameMap={userNameMap}
         mentorInternOptions={visibleInternOptions}
+        onOpenTask={handleOpenTaskFromChat}
         onClose={() => setIsChatOpen(false)}
         open={isChatOpen}
+        taskOptions={allBoardTasks}
         token={session?.access_token}
       />
+
+      {isProfileModalOpen && (
+        <Modal
+          onClose={() => setIsProfileModalOpen(false)}
+          subtitle="Измените отображаемое имя и фотографию профиля."
+          title="Profile settings"
+        >
+          <form className="compact-form" onSubmit={handleSaveProfile}>
+            <label>
+              Имя
+              <input
+                name="first_name"
+                onChange={updateProfileForm}
+                value={profileForm.first_name}
+              />
+            </label>
+            <label>
+              Фамилия
+              <input
+                name="last_name"
+                onChange={updateProfileForm}
+                value={profileForm.last_name}
+              />
+            </label>
+            <label>
+              Фото профиля
+              <input onChange={handleProfileAvatarChange} type="file" />
+            </label>
+            {profileForm.avatar_url && (
+              <div className="profile-preview">
+                <img alt="Profile preview" src={profileForm.avatar_url} />
+              </div>
+            )}
+            <div className="modal-actions">
+              <button
+                className="secondary-button"
+                onClick={() => setIsProfileModalOpen(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button className="primary-button" disabled={loading} type="submit">
+                Save
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
 
       {isTaskModalOpen && (
         <Modal
           onClose={() => setIsTaskModalOpen(false)}
-          subtitle="Форма создания новой задачи открывается поверх доски."
-          title="Создание задачи"
+          subtitle="Создание новой задачи открывается поверх рабочей доски."
+          title="Create task"
         >
           <form className="compact-form" onSubmit={handleCreateTask}>
             <label>
@@ -1242,10 +1526,10 @@ function App() {
                 onClick={() => setIsTaskModalOpen(false)}
                 type="button"
               >
-                Отмена
+                Cancel
               </button>
               <button className="primary-button" disabled={loading} type="submit">
-                Создать задачу
+                Create
               </button>
             </div>
           </form>
@@ -1256,7 +1540,7 @@ function App() {
         <Modal
           onClose={() => setIsStatusModalOpen(false)}
           subtitle="Новый статус сразу появится отдельной колонкой на доске."
-          title="Добавление статуса"
+          title="Create status"
         >
           <form className="compact-form" onSubmit={handleCreateStatus}>
             <label>
@@ -1291,10 +1575,10 @@ function App() {
                 onClick={() => setIsStatusModalOpen(false)}
                 type="button"
               >
-                Отмена
+                Cancel
               </button>
               <button className="primary-button" disabled={loading} type="submit">
-                Добавить статус
+                Create
               </button>
             </div>
           </form>

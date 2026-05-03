@@ -65,90 +65,107 @@ export function TaskDetail({
         onClick={(event) => event.stopPropagation()}
         role="dialog"
       >
-        <div className="section-head detail-panel-head">
-          <div>
-            <p className="auth-kicker">DETAIL PANEL</p>
-            <h3>{selectedTask.title}</h3>
-            <div className="detail-meta-row">
-              <span className="detail-badge">TASK-{shortId(selectedTask.id)}</span>
+        <div className="task-detail-hero jira-task-detail-hero">
+          <div className="task-detail-copy">
+            <div className="jira-task-path">
+              <span className="detail-badge">MD-{shortId(selectedTask.id)}</span>
+              <span className="jira-task-path-separator">/</span>
               <span className="detail-badge subtle">
                 {selectedTaskColumnName || 'Без статуса'}
               </span>
-              <span className="detail-badge subtle detail-user-badge">
-                <UserAvatar
-                  size="xs"
-                  user={userMap?.[selectedTask.intern_id] || { id: selectedTask.intern_id }}
-                />
-                <span>
-                  Исполнитель {userNameMap?.[selectedTask.intern_id] || shortId(selectedTask.intern_id)}
-                </span>
-              </span>
             </div>
+            <h3>{selectedTask.title}</h3>
+            <p className="auth-subtitle">
+              Детальная карточка задачи с редактированием, обсуждением,
+              материалами и вложениями в одном окне.
+            </p>
           </div>
-          <div className="detail-head-actions">
+
+          <div className="task-detail-actions">
             <button className="icon-button" onClick={onClose} type="button">
               Закрыть
             </button>
             {canDeleteTask && (
               <button className="danger-button" onClick={onDeleteTask} type="button">
-                Delete
+                Удалить
               </button>
             )}
           </div>
         </div>
 
-        <div className="compact-form detail-form">
-          <label>
-            Название
-            <input name="title" onChange={onTaskDraftChange} value={taskDraft.title} />
-          </label>
-          <label>
-            Описание
-            <textarea
-              name="description"
-              onChange={onTaskDraftChange}
-              value={taskDraft.description}
+        <div className="task-detail-summary jira-task-detail-summary">
+          <span className="detail-badge subtle detail-user-badge">
+            <UserAvatar
+              size="xs"
+              user={userMap?.[selectedTask.intern_id] || { id: selectedTask.intern_id }}
             />
-          </label>
-          <div className="detail-fields-row">
+            <span>
+              {userNameMap?.[selectedTask.intern_id] || shortId(selectedTask.intern_id)}
+            </span>
+          </span>
+        </div>
+
+        <section className="task-detail-editor jira-detail-overview">
+          <div className="section-head">
+            <div>
+              <p className="auth-kicker">OVERVIEW</p>
+              <h4>Основная информация</h4>
+            </div>
+          </div>
+
+          <div className="compact-form detail-form">
             <label>
-              Статус
-              <select
-                name="status_id"
-                onChange={onTaskDraftChange}
-                value={taskDraft.status_id}
-              >
-                {statuses.map((status) => (
-                  <option key={status.id} value={status.id}>
-                    {status.name}
-                  </option>
-                ))}
-              </select>
+              Название
+              <input name="title" onChange={onTaskDraftChange} value={taskDraft.title} />
             </label>
-            {canChangeIntern && (
+            <label>
+              Описание
+              <textarea
+                name="description"
+                onChange={onTaskDraftChange}
+                value={taskDraft.description}
+              />
+            </label>
+            <div className="detail-fields-row">
               <label>
-                Исполнитель
+                Статус
                 <select
-                  name="intern_id"
+                  name="status_id"
                   onChange={onTaskDraftChange}
-                  value={taskDraft.intern_id}
+                  value={taskDraft.status_id}
                 >
-                  {mentorLinks.map((link) => (
-                    <option key={link.id} value={link.intern_id}>
-                      {userNameMap?.[link.intern_id] || shortId(link.intern_id)}
+                  {statuses.map((status) => (
+                    <option key={status.id} value={status.id}>
+                      {status.name}
                     </option>
                   ))}
                 </select>
               </label>
-            )}
+              {canChangeIntern && (
+                <label>
+                  Исполнитель
+                  <select
+                    name="intern_id"
+                    onChange={onTaskDraftChange}
+                    value={taskDraft.intern_id}
+                  >
+                    {mentorLinks.map((link) => (
+                      <option key={link.id} value={link.intern_id}>
+                        {userNameMap?.[link.intern_id] || shortId(link.intern_id)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+            <button className="primary-button" onClick={onSaveTask} type="button">
+              Сохранить изменения
+            </button>
           </div>
-          <button className="primary-button" onClick={onSaveTask} type="button">
-            Сохранить
-          </button>
-        </div>
+        </section>
 
-        <div className="detail-grid">
-          <section className="subpanel">
+        <div className="detail-grid task-detail-grid jira-task-detail-grid">
+          <section className="subpanel jira-subpanel">
             <div className="subpanel-head">
               <h4>Комментарии</h4>
             </div>
@@ -160,18 +177,20 @@ export function TaskDetail({
                 value={commentForm.content}
               />
               <button className="secondary-button" type="submit">
-                Добавить комментарий
+                Отправить
               </button>
             </form>
             <div className="item-list">
               {taskComments.map((comment) => (
-                <article className="item-card" key={comment.id}>
+                <article className="item-card detail-item-card" key={comment.id}>
                   <div className="item-card-meta">
                     <UserAvatar
                       size="xs"
                       user={userMap?.[comment.author_id] || { id: comment.author_id }}
                     />
-                    <span>{userNameMap?.[comment.author_id] || shortId(comment.author_id)}</span>
+                    <span>
+                      {userNameMap?.[comment.author_id] || shortId(comment.author_id)}
+                    </span>
                   </div>
                   <p>{comment.content}</p>
                   {comment.author_id === currentUser?.id && (
@@ -180,7 +199,7 @@ export function TaskDetail({
                       onClick={() => onDeleteComment(comment.id)}
                       type="button"
                     >
-                      Delete
+                      Удалить
                     </button>
                   )}
                 </article>
@@ -188,7 +207,7 @@ export function TaskDetail({
             </div>
           </section>
 
-          <section className="subpanel">
+          <section className="subpanel jira-subpanel">
             <div className="subpanel-head">
               <h4>Ссылки</h4>
             </div>
@@ -211,13 +230,15 @@ export function TaskDetail({
             </form>
             <div className="item-list">
               {taskLinks.map((link) => (
-                <article className="item-card" key={link.id}>
+                <article className="item-card detail-item-card" key={link.id}>
                   <div className="item-card-meta">
                     <UserAvatar
                       size="xs"
                       user={userMap?.[link.author_id] || { id: link.author_id }}
                     />
-                    <span>{userNameMap?.[link.author_id] || shortId(link.author_id)}</span>
+                    <span>
+                      {userNameMap?.[link.author_id] || shortId(link.author_id)}
+                    </span>
                   </div>
                   <a href={link.url} rel="noreferrer" target="_blank">
                     {link.title}
@@ -228,7 +249,7 @@ export function TaskDetail({
                       onClick={() => onDeleteLink(link.id)}
                       type="button"
                     >
-                      Delete
+                      Удалить
                     </button>
                   )}
                 </article>
@@ -236,7 +257,7 @@ export function TaskDetail({
             </div>
           </section>
 
-          <section className="subpanel">
+          <section className="subpanel jira-subpanel">
             <div className="subpanel-head">
               <h4>Вложения</h4>
             </div>
@@ -248,7 +269,7 @@ export function TaskDetail({
                     display_name: event.target.value,
                   })
                 }
-                placeholder="Отображаемое имя"
+                placeholder="Название файла"
                 value={attachmentForm.display_name}
               />
               <input
@@ -256,12 +277,12 @@ export function TaskDetail({
                 type="file"
               />
               <button className="secondary-button" type="submit">
-                Добавить вложение
+                Загрузить
               </button>
             </form>
             <div className="item-list">
               {taskAttachments.map((attachment) => (
-                <article className="item-card" key={attachment.id}>
+                <article className="item-card detail-item-card" key={attachment.id}>
                   <p>{attachment.display_name}</p>
                   <button
                     className="text-button"
@@ -280,7 +301,7 @@ export function TaskDetail({
                       onClick={() => onDeleteAttachment(attachment.id)}
                       type="button"
                     >
-                      Delete
+                      Удалить
                     </button>
                   )}
                 </article>

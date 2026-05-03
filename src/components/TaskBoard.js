@@ -14,21 +14,21 @@ export function TaskBoard({
   const [hoveredStatusId, setHoveredStatusId] = useState(null);
 
   return (
-    <section className="board-area">
+    <section className="board-area jira-board-area">
       {boardColumns.map((column) => (
         <article
-          className={`board-column ${
+          className={`board-column jira-board-column ${
             hoveredStatusId === column.status.id ? 'board-column-active' : ''
           }`}
           key={column.status.id}
-          onDragOver={(event) => {
-            event.preventDefault();
-            setHoveredStatusId(column.status.id);
-          }}
           onDragLeave={() => {
             if (hoveredStatusId === column.status.id) {
               setHoveredStatusId(null);
             }
+          }}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setHoveredStatusId(column.status.id);
           }}
           onDrop={(event) => {
             event.preventDefault();
@@ -41,18 +41,21 @@ export function TaskBoard({
             }
           }}
         >
-          <header className="board-column-head">
-            <div>
+          <header className="board-column-head jira-board-column-head">
+            <div className="board-column-copy">
+              <span className="board-column-dot" />
               <h3>{column.status.name}</h3>
-              <p>{column.tasks.length} tasks</p>
+              <p>{column.tasks.length} задач</p>
             </div>
-            <span className="column-chip">{column.status.code || 'STATUS'}</span>
+            <span className="column-chip jira-column-chip">
+              {column.status.code || 'STATUS'}
+            </span>
           </header>
 
           <div className="board-task-list">
             {column.tasks.map((task) => (
               <button
-                className={`task-card ${
+                className={`task-card jira-task-card ${
                   selectedTask?.id === task.id ? 'selected' : ''
                 }`}
                 draggable
@@ -69,21 +72,34 @@ export function TaskBoard({
                 }}
                 type="button"
               >
-                <div className="task-card-topline">
-                  <span className="task-key">TASK-{shortId(task.id)}</span>
-                  <span className="task-assignee">
-                    <UserAvatar size="xs" user={userMap?.[task.intern_id] || { id: task.intern_id }} />
-                    <span>{userNameMap?.[task.intern_id] || shortId(task.intern_id)}</span>
+                <div className="task-card-assignee-top">
+                  <UserAvatar
+                    size="xs"
+                    user={userMap?.[task.intern_id] || { id: task.intern_id }}
+                  />
+                  <span className="task-assignee-name">
+                    {userNameMap?.[task.intern_id] || shortId(task.intern_id)}
                   </span>
                 </div>
+
+                <span className="task-key">MD-{shortId(task.id)}</span>
+
                 <strong>{task.title}</strong>
-                <p>{task.description || 'Нет описания.'}</p>
+
+                <p>
+                  {task.description ||
+                    'Описание пока не заполнено, но карточка уже в работе.'}
+                </p>
+
+                <div className="task-card-footer">
+                  <span className="task-card-open">Открыть</span>
+                </div>
               </button>
             ))}
 
             {column.tasks.length === 0 && (
-              <div className="task-card empty-card">
-                Перетащите сюда задачу или создайте новую.
+              <div className="task-card empty-card jira-empty-card">
+                Перетащите сюда задачу или создайте новую карточку.
               </div>
             )}
           </div>

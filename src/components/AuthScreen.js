@@ -1,5 +1,15 @@
 import React from 'react';
 
+function AuthField({ label, children, hint }) {
+  return (
+    <label className="auth-field">
+      <span className="auth-field-label">{label}</span>
+      {children}
+      {hint ? <span className="auth-field-hint">{hint}</span> : null}
+    </label>
+  );
+}
+
 export function LoginScreen({
   loading,
   loginForm,
@@ -9,49 +19,54 @@ export function LoginScreen({
 }) {
   return (
     <>
-      <div className="auth-header">
-        <p className="auth-kicker">AUTH</p>
-        <h1>Sign in</h1>
-        <p className="auth-subtitle">Access your account.</p>
+      <div className="auth-header jira-auth-header">
+        <p className="auth-kicker">WORKSPACE LOGIN</p>
+        <h1>Авторизация</h1>
+        <p className="auth-subtitle">
+          Войдите в рабочее пространство стажировки и продолжите работу с
+          задачами, материалами и чатами.
+        </p>
       </div>
 
-      <form className="auth-form" onSubmit={onSubmit}>
-        <label>
-          Email
+      <form className="auth-form jira-auth-form" onSubmit={onSubmit}>
+        <AuthField label="Email">
           <input
             name="email"
             onChange={onChange}
+            placeholder="you@company.by"
             required
             type="email"
             value={loginForm.email}
           />
-        </label>
+        </AuthField>
 
-        <label>
-          Password
+        <AuthField label="Пароль">
           <input
             minLength="8"
             name="password"
             onChange={onChange}
+            placeholder="Введите пароль"
             required
             type="password"
             value={loginForm.password}
           />
-        </label>
+        </AuthField>
 
-        <button className="primary-button" disabled={loading} type="submit">
-          Sign in
-        </button>
+        <div className="auth-form-actions">
+          <button className="primary-button auth-submit" disabled={loading} type="submit">
+            Войти
+          </button>
+        </div>
       </form>
 
       <p className="auth-link-row">
-        No account?
+        Нет аккаунта?
         <button
           className="text-button"
           onClick={onNavigateRegister}
           type="button"
         >
-          Register
+          Зарегистрироваться
         </button>
       </p>
     </>
@@ -72,92 +87,98 @@ export function RegisterScreen({
 
   return (
     <>
-      <div className="auth-header">
-        <p className="auth-kicker">AUTH</p>
-        <h1>Create account</h1>
-        <p className="auth-subtitle">Register a new account.</p>
+      <div className="auth-header jira-auth-header">
+        <p className="auth-kicker">CREATE ACCOUNT</p>
+        <h1>Регистрация</h1>
+        <p className="auth-subtitle">
+          Создайте аккаунт, чтобы получить доступ к доске задач, рабочим
+          материалам и коммуникации с наставником.
+        </p>
       </div>
 
-      <form className="auth-form" onSubmit={onSubmit}>
-        <label>
-          First name
-          <input
-            name="first_name"
-            onChange={onChange}
-            required
-            value={registerForm.first_name}
-          />
-        </label>
+      <form className="auth-form jira-auth-form" onSubmit={onSubmit}>
+        <div className="auth-grid-two">
+          <AuthField label="Имя">
+            <input
+              name="first_name"
+              onChange={onChange}
+              placeholder="Алексей"
+              required
+              value={registerForm.first_name}
+            />
+          </AuthField>
 
-        <label>
-          Last name
-          <input
-            name="last_name"
-            onChange={onChange}
-            required
-            value={registerForm.last_name}
-          />
-        </label>
+          <AuthField label="Фамилия">
+            <input
+              name="last_name"
+              onChange={onChange}
+              placeholder="Иванов"
+              required
+              value={registerForm.last_name}
+            />
+          </AuthField>
+        </div>
 
-        <label>
-          Email
+        <AuthField label="Email">
           <input
             name="email"
             onChange={onChange}
+            placeholder="you@company.by"
             required
             type="email"
             value={registerForm.email}
           />
-        </label>
+        </AuthField>
 
-        <label>
-          Password
+        <AuthField label="Пароль" hint="Минимум 8 символов">
           <input
             minLength="8"
             name="hashed_password"
             onChange={onChange}
+            placeholder="Создайте пароль"
             required
             type="password"
             value={registerForm.hashed_password}
           />
-        </label>
+        </AuthField>
 
         {showRoleSelect && (
-          <label>
-            Role
+          <AuthField label="Роль">
             <select
               name="role_id"
               onChange={onChange}
               required
               value={registerForm.role_id}
             >
-              <option value="">Select a role</option>
+              <option value="">Выберите роль</option>
               {roles.map((role) => (
                 <option key={role.id} value={role.id}>
                   {role.name}
                 </option>
               ))}
             </select>
-          </label>
+          </AuthField>
         )}
 
-        <button
-          className="primary-button"
-          disabled={loading || !registerForm.role_id}
-          type="submit"
-        >
-          Register
-        </button>
+        <div className="auth-form-actions">
+          <button
+            className="primary-button auth-submit"
+            disabled={loading || !registerForm.role_id}
+            type="submit"
+          >
+            Создать аккаунт
+          </button>
+        </div>
       </form>
 
       <p className="auth-link-row">
-        Already have an account?
+        Уже есть аккаунт?
         <button
           className="text-button"
           onClick={onNavigateLogin}
           type="button"
         >
-          Sign in
+          Войти
         </button>
       </p>
     </>

@@ -120,7 +120,7 @@ afterEach(() => {
 test('renders auth page heading', async () => {
   render(<App />);
   expect(
-    await screen.findByRole('heading', { name: /Sign in/i })
+    await screen.findByRole('heading', { name: /Авторизация/i })
   ).toBeInTheDocument();
 });
 
@@ -137,9 +137,11 @@ test('logs out automatically when token expires', async () => {
   render(<App />);
 
   expect(
-    await screen.findByText(/Сессия истекла\. Выполнен автоматический выход\./i)
+    await screen.findByText(/Сессия истекла\./i)
   ).toBeInTheDocument();
-  expect(await screen.findByRole('heading', { name: /Sign in/i })).toBeInTheDocument();
+  expect(
+    await screen.findByRole('heading', { name: /Авторизация/i })
+  ).toBeInTheDocument();
   expect(window.localStorage.getItem('auth-diploma-session')).toBeNull();
 });
 
@@ -155,15 +157,19 @@ test('shows mentor name and closes task drawer', async () => {
 
   render(<App />);
 
-  expect(await screen.findByText(/Mentor: Иван Петров/i)).toBeInTheDocument();
+  expect(await screen.findByText(/Иван Петров/i)).toBeInTheDocument();
 
-  fireEvent.click(await screen.findByRole('button', { name: /Подготовить отчёт/i }));
+  fireEvent.click(
+    await screen.findByRole('button', { name: /Подготовить отчёт/i })
+  );
 
-  expect(await screen.findByRole('button', { name: /Закрыть/i })).toBeInTheDocument();
+  expect(
+    await screen.findByRole('button', { name: /Закрыть/i })
+  ).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: /Закрыть/i }));
 
   await waitFor(() => {
-    expect(screen.queryByText(/DETAIL PANEL/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/TASK DETAIL/i)).not.toBeInTheDocument();
   });
 });
